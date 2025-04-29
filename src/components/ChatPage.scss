@@ -1,0 +1,23 @@
+.chat-page {
+    padding: 1rem;
+    background: #f5f5f5;
+  
+    .chat-box {
+      height: 300px;
+      overflow-y: auto;
+      background: #242424;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      border: 1px solid #ccc;
+    }
+  
+    input {
+      padding: 0.5rem;
+      margin-right: 0.5rem;
+    }
+  
+    button {
+      padding: 0.5rem 1rem;
+    }
+  }
+  
