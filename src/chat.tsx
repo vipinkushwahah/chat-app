@@ -49,24 +49,27 @@ function Chat() {
       setUsers(list);
     });
 
-    socket.on('incoming_call', async ({ from, offer }) => {
-      await setupMedia();
+    socket.on('group_users', ({ users }) => {
+      // Optional: could be used to show group participants
+    });
 
+    socket.on('group_call_offer', async ({ from, offer }) => {
+      await setupMedia();
       const pc = createPeerConnection(from);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      socket.emit('answer_call', { to: from, answer });
+      socket.emit('group_call_answer', { to: from, answer });
     });
 
-    socket.on('call_answered', async ({ from, answer }) => {
+    socket.on('group_call_answer', async ({ from, answer }) => {
       const pc = peerConnections.current[from];
-      await pc?.setRemoteDescription(new RTCSessionDescription(answer));
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
     });
 
     socket.on('ice_candidate', ({ from, candidate }) => {
       const pc = peerConnections.current[from];
-      pc?.addIceCandidate(new RTCIceCandidate(candidate));
+      if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate));
     });
 
     socket.on('call_ended', () => {
@@ -76,8 +79,8 @@ function Chat() {
     return () => {
       socket.off('receive_message');
       socket.off('user_list');
-      socket.off('incoming_call');
-      socket.off('call_answered');
+      socket.off('group_call_offer');
+      socket.off('group_call_answer');
       socket.off('ice_candidate');
       socket.off('call_ended');
     };
@@ -89,9 +92,7 @@ function Chat() {
         video: { facingMode: isFrontCamera ? 'user' : 'environment' },
         audio: true,
       });
-
       localStream.current = stream;
-
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
         localVideoRef.current.muted = true;
@@ -103,21 +104,24 @@ function Chat() {
     }
   };
 
-  const createPeerConnection = (userId: string) => {
+  const createPeerConnection = (peerId: string) => {
     const pc = new RTCPeerConnection(servers);
-    peerConnections.current[userId] = pc;
+    peerConnections.current[peerId] = pc;
 
     localStream.current?.getTracks().forEach(track => {
       pc.addTrack(track, localStream.current!);
     });
 
     pc.ontrack = (event) => {
-      setRemoteStreams(prev => ({ ...prev, [userId]: event.streams[0] }));
+      setRemoteStreams(prev => ({ ...prev, [peerId]: event.streams[0] }));
     };
 
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        socket.emit('ice_candidate', { to: userId, candidate: e.candidate });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('ice_candidate', {
+          to: peerId,
+          candidate: event.candidate,
+        });
       }
     };
 
@@ -151,25 +155,40 @@ function Chat() {
 
   const startGroupCall = async () => {
     await setupMedia();
+    setInCall(true);
 
-    users.filter(u => u !== username).forEach(async (user) => {
-      const pc = createPeerConnection(user);
+    const groupMembers = users.filter(u => u !== username);
+
+    for (const member of groupMembers) {
+      const pc = createPeerConnection(member);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      socket.emit('call_user', { to: user, offer });
-    });
+      socket.emit('group_call_offer', {
+        group: joinedGroup,
+        offer,
+      });
+    }
+  };
 
+  const startPrivateCall = async () => {
+    if (!targetUser) return;
+    await setupMedia();
+    const pc = createPeerConnection(targetUser);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit('private_message', {
+      to: targetUser,
+      message: '[Video Call Initiated]',
+    });
+    socket.emit('group_call_offer', { group: '', offer }); // Still uses group_call_offer for consistency
     setInCall(true);
   };
 
   const endCallCleanup = () => {
     Object.values(peerConnections.current).forEach(pc => pc.close());
     peerConnections.current = {};
-
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => track.stop());
-      localStream.current = null;
-    }
+    localStream.current?.getTracks().forEach(track => track.stop());
+    localStream.current = null;
 
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
@@ -228,6 +247,7 @@ function Chat() {
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
+            <button onClick={startPrivateCall} disabled={!targetUser || inCall}>Private Call</button>
 
             <h3>Group</h3>
             <input placeholder="Group name" onChange={(e) => setGroup(e.target.value)} />
@@ -265,9 +285,7 @@ function Chat() {
                 <video
                   key={userId}
                   ref={(video) => {
-                    if (video) {
-                      video.srcObject = stream;
-                    }
+                    if (video) video.srcObject = stream;
                   }}
                   autoPlay
                   playsInline
