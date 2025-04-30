@@ -22,10 +22,11 @@ function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState<'private' | 'group'>('private');
   const [inCall, setInCall] = useState(false);
+  const [isFrontCamera, setIsFrontCamera] = useState(true);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const peerConnections = useRef<Record<string, RTCPeerConnection>>({});
   const localStream = useRef<MediaStream | null>(null);
 
   const servers = {
@@ -49,37 +50,23 @@ function Chat() {
     });
 
     socket.on('incoming_call', async ({ from, offer }) => {
-      peerConnection.current = new RTCPeerConnection(servers);
       await setupMedia();
 
-      peerConnection.current.ontrack = (event) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      peerConnection.current.onicecandidate = (e) => {
-        if (e.candidate) {
-          socket.emit('ice_candidate', { to: from, candidate: e.candidate });
-        }
-      };
-
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
+      const pc = createPeerConnection(from);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
       socket.emit('answer_call', { to: from, answer });
-
-      setTargetUser(from);
-      setInCall(true);
     });
 
-    socket.on('call_answered', async ({ answer }) => {
-      await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(answer));
-      setInCall(true);
+    socket.on('call_answered', async ({ from, answer }) => {
+      const pc = peerConnections.current[from];
+      await pc?.setRemoteDescription(new RTCSessionDescription(answer));
     });
 
-    socket.on('ice_candidate', ({ candidate }) => {
-      peerConnection.current?.addIceCandidate(new RTCIceCandidate(candidate));
+    socket.on('ice_candidate', ({ from, candidate }) => {
+      const pc = peerConnections.current[from];
+      pc?.addIceCandidate(new RTCIceCandidate(candidate));
     });
 
     socket.on('call_ended', () => {
@@ -99,7 +86,7 @@ function Chat() {
   const setupMedia = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' },
+        video: { facingMode: isFrontCamera ? 'user' : 'environment' },
         audio: true,
       });
 
@@ -110,34 +97,31 @@ function Chat() {
         localVideoRef.current.muted = true;
         await localVideoRef.current.play();
       }
-
-      stream.getTracks().forEach(track => {
-        peerConnection.current?.addTrack(track, stream);
-      });
     } catch (err) {
       console.error('Media access denied:', err);
       alert('Please allow camera and microphone access.');
     }
   };
 
-  const endCallCleanup = () => {
-    peerConnection.current?.close();
-    peerConnection.current = null;
+  const createPeerConnection = (userId: string) => {
+    const pc = new RTCPeerConnection(servers);
+    peerConnections.current[userId] = pc;
 
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => track.stop());
-      localStream.current = null;
-    }
+    localStream.current?.getTracks().forEach(track => {
+      pc.addTrack(track, localStream.current!);
+    });
 
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
+    pc.ontrack = (event) => {
+      setRemoteStreams(prev => ({ ...prev, [userId]: event.streams[0] }));
+    };
 
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        socket.emit('ice_candidate', { to: userId, candidate: e.candidate });
+      }
+    };
 
-    setInCall(false);
+    return pc;
   };
 
   const handleRegister = () => {
@@ -165,35 +149,65 @@ function Chat() {
     setMessage('');
   };
 
-  const startCall = async () => {
-    if (!targetUser) return;
-
-    peerConnection.current = new RTCPeerConnection(servers);
+  const startGroupCall = async () => {
     await setupMedia();
 
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
+    users.filter(u => u !== username).forEach(async (user) => {
+      const pc = createPeerConnection(user);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('call_user', { to: user, offer });
+    });
 
-    peerConnection.current.onicecandidate = (e) => {
-      if (e.candidate) {
-        socket.emit('ice_candidate', { to: targetUser, candidate: e.candidate });
-      }
-    };
+    setInCall(true);
+  };
 
-    const offer = await peerConnection.current.createOffer();
-    await peerConnection.current.setLocalDescription(offer);
+  const endCallCleanup = () => {
+    Object.values(peerConnections.current).forEach(pc => pc.close());
+    peerConnections.current = {};
 
-    socket.emit('call_user', { to: targetUser, offer });
+    if (localStream.current) {
+      localStream.current.getTracks().forEach(track => track.stop());
+      localStream.current = null;
+    }
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+
+    setRemoteStreams({});
+    setInCall(false);
   };
 
   const endCall = () => {
-    if (targetUser) {
-      socket.emit('end_call', { to: targetUser });
-    }
+    socket.emit('end_call');
     endCallCleanup();
+  };
+
+  const switchCamera = async () => {
+    setIsFrontCamera(prev => !prev);
+    if (!localStream.current) return;
+    localStream.current.getTracks().forEach(track => track.stop());
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: isFrontCamera ? 'environment' : 'user' },
+      audio: true,
+    });
+
+    localStream.current = stream;
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.muted = true;
+      await localVideoRef.current.play();
+    }
+
+    Object.values(peerConnections.current).forEach(pc => {
+      const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (videoSender) {
+        videoSender.replaceTrack(stream.getVideoTracks()[0]);
+      }
+    });
   };
 
   return (
@@ -220,8 +234,9 @@ function Chat() {
             <button onClick={joinGroup}>Join Group</button>
 
             <h3>Video Call</h3>
-            <button onClick={startCall} disabled={!targetUser || inCall}>Start Call with {targetUser}</button>
+            <button onClick={startGroupCall} disabled={!joinedGroup || inCall}>Start Group Call</button>
             {inCall && <button onClick={endCall}>End Call</button>}
+            {inCall && <button onClick={switchCamera}>Switch Camera</button>}
           </div>
 
           <div className="chat-main">
@@ -246,7 +261,19 @@ function Chat() {
 
             <div className="video-call">
               <video ref={localVideoRef} autoPlay muted playsInline className="video" />
-              <video ref={remoteVideoRef} autoPlay playsInline className="video" />
+              {Object.entries(remoteStreams).map(([userId, stream]) => (
+                <video
+                  key={userId}
+                  ref={(video) => {
+                    if (video) {
+                      video.srcObject = stream;
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  className="video"
+                />
+              ))}
             </div>
           </div>
         </div>
