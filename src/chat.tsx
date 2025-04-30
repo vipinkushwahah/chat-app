@@ -26,6 +26,7 @@ function Chat() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const localStream = useRef<MediaStream | null>(null);
 
   const servers = {
     iceServers: [
@@ -97,33 +98,45 @@ function Chat() {
 
   const setupMedia = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: true,
+      });
+
+      localStream.current = stream;
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true;
+        await localVideoRef.current.play();
+      }
+
       stream.getTracks().forEach(track => {
         peerConnection.current?.addTrack(track, stream);
       });
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
     } catch (err) {
       console.error('Media access denied:', err);
-      alert('Please allow camera and microphone access to use video calling.');
+      alert('Please allow camera and microphone access.');
     }
   };
 
   const endCallCleanup = () => {
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
+    peerConnection.current?.close();
+    peerConnection.current = null;
+
+    if (localStream.current) {
+      localStream.current.getTracks().forEach(track => track.stop());
+      localStream.current = null;
     }
-    if (localVideoRef.current?.srcObject) {
-      (localVideoRef.current.srcObject as MediaStream)
-        .getTracks()
-        .forEach(track => track.stop());
+
+    if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
     }
-    if (remoteVideoRef.current?.srcObject) {
+
+    if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
+
     setInCall(false);
   };
 
