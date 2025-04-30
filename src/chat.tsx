@@ -28,7 +28,14 @@ function Chat() {
   const peerConnection = useRef<RTCPeerConnection | null>(null);
 
   const servers = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
   };
 
   useEffect(() => {
@@ -89,12 +96,17 @@ function Chat() {
   }, []);
 
   const setupMedia = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    stream.getTracks().forEach(track => {
-      peerConnection.current?.addTrack(track, stream);
-    });
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      stream.getTracks().forEach(track => {
+        peerConnection.current?.addTrack(track, stream);
+      });
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error('Media access denied:', err);
+      alert('Please allow camera and microphone access to use video calling.');
     }
   };
 
