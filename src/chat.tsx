@@ -78,13 +78,13 @@ function Chat() {
     });
 
     // Group call offer/answer
-    socket.on('group_call_offer', async ({ from, offer }) => {
+    socket.on('group_call_offer', async ({ from, offer, to }) => {
       await setupMedia();
       const pc = createPeerConnection(from);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      socket.emit('group_call_answer', { to: from, answer });
+      socket.emit('group_call_answer', { to, answer });
     });
 
     socket.on('group_call_answer', async ({ from, answer }) => {
@@ -124,7 +124,13 @@ function Chat() {
     });
 
     pc.ontrack = (event) => {
-      setRemoteStreams(prev => ({ ...prev, [peerId]: event.streams[0] }));
+      const [remoteStream] = event.streams;
+      if (remoteStream) {
+        setRemoteStreams(prev => ({ ...prev, [peerId]: remoteStream }));
+      } else {
+        const newStream = new MediaStream([event.track]);
+        setRemoteStreams(prev => ({ ...prev, [peerId]: newStream }));
+      }
     };
 
     pc.onicecandidate = (event) => {
@@ -275,67 +281,75 @@ function Chat() {
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
-            <button onClick={startPrivateCall} disabled={!targetUser || inCall}>Private Call</button>
-
-            <h3>Group</h3>
-            <input placeholder="Group name" onChange={(e) => setGroup(e.target.value)} />
+            <button onClick={startPrivateCall} disabled={!targetUser}>Start Private Call</button>
+            <hr />
+            <h3>Groups</h3>
+            <input
+              type="text"
+              placeholder="Enter Group Name"
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+            />
             <button onClick={joinGroup}>Join Group</button>
-
-            <h3>Video Call</h3>
-            <button onClick={startGroupCall} disabled={!joinedGroup || inCall}>Start Group Call</button>
-            {inCall && <button onClick={endCall}>End Call</button>}
-            {inCall && <button onClick={switchCamera}>Switch Camera</button>}
-          </div>
-
-          <div className="chat-main">
-            <h2>Chatting as: {username}</h2>
-            <div className="messages">
-              {messages.map((msg, idx) => (
-                <div key={idx}>
-                  <strong>{msg.type === 'group' ? `[${msg.group}] ${msg.from}` : `${msg.from}`}:</strong> {msg.message}
-                </div>
-              ))}
-            </div>
-
-            <div className="message-input">
+            <hr />
+            <button onClick={startGroupCall} disabled={!joinedGroup}>Start Group Call</button>
+            <hr />
+            <h3>Messages</h3>
+            <div>
               <input
-                placeholder="Type a message..."
+                type="text"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                placeholder="Type your message"
               />
               <button onClick={sendMessage}>Send</button>
             </div>
-
-            <div className="video-call">
-              <video ref={localVideoRef} autoPlay muted playsInline className="video" />
-              {Object.entries(remoteStreams).map(([userId, stream]) => (
-                <VideoPlayer key={userId} stream={stream} />
+            <div className="messages">
+              {messages.map((msg, index) => (
+                <div key={index}>
+                  <strong>{msg.from}</strong>: {msg.message}
+                </div>
               ))}
             </div>
-
-            {incomingCall && (
-              <div className="incoming-call-dialog">
-                <h3>Incoming Call from {incomingCall.from}</h3>
-                <button onClick={answerCall}>Answer</button>
-                <button onClick={declineCall}>Decline</button>
-              </div>
-            )}
           </div>
+          <div className="main">
+            <div className="video-call">
+              <video ref={localVideoRef} autoPlay muted></video>
+              {Object.entries(remoteStreams).map(([peerId, stream]) => (
+                <VideoPlayer key={peerId} stream={stream} />
+              ))}
+            </div>
+          </div>
+          {inCall && (
+            <div className="call-controls">
+              <button onClick={endCall}>End Call</button>
+              <button onClick={switchCamera}>Switch Camera</button>
+            </div>
+          )}
+          {incomingCall && (
+            <div className="incoming-call">
+              <h2>Incoming call from {incomingCall.from}</h2>
+              <button onClick={answerCall}>Answer</button>
+              <button onClick={declineCall}>Decline</button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function VideoPlayer({ stream }: { stream: MediaStream }) {
+const VideoPlayer = ({ stream }: { stream: MediaStream }) => {
   const ref = useRef<HTMLVideoElement>(null);
+
   useEffect(() => {
-    if (ref.current && stream) {
+    if (ref.current) {
       ref.current.srcObject = stream;
+      ref.current.play().catch((err) => console.error('Video play error:', err));
     }
   }, [stream]);
-  return <video ref={ref} autoPlay playsInline className="video" />;
-}
+
+  return <video ref={ref} autoPlay playsInline />;
+};
 
 export default Chat;
