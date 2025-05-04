@@ -1,4 +1,3 @@
-// Chat.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import './chat.scss';
@@ -255,7 +254,6 @@ function Chat() {
             <button onClick={joinGroup}>Join Group</button>
 
             <h3>Video Call</h3>
-            <button onClick={startCall} disabled={!targetUser || inCall}>Start Call</button>
             <button onClick={startGroupCall} disabled={!joinedGroup || inCall}>Start Group Call</button>
             {inCall && <button onClick={endCall}>End Call</button>}
           </div>
