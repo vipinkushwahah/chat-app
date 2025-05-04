@@ -1,81 +1,80 @@
 .chat-container {
-    font-family: Arial, sans-serif;
-    padding: 20px;
-  
-    .login {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+
+  .login {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    input {
+      padding: 8px;
+      margin: 10px;
+    }
+  }
+
+  .chat-box {
+    display: flex;
+    gap: 20px;
+
+    .sidebar {
+      width: 200px;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      input {
-        padding: 8px;
-        margin: 10px;
+
+      select, input {
+        margin-bottom: 10px;
+        padding: 6px;
       }
     }
-  
-    .chat-box {
+
+    .chat-main {
+      flex: 1;
       display: flex;
-      gap: 20px;
-  
-      .sidebar {
-        width: 200px;
-        display: flex;
-        flex-direction: column;
-  
-        select, input {
-          margin-bottom: 10px;
-          padding: 6px;
-        }
+      flex-direction: column;
+
+      .messages {
+        height: 300px;
+        overflow-y: scroll;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-bottom: 10px;
       }
-  
-      .chat-main {
-        flex: 1;
+
+      .message-input {
         display: flex;
-        flex-direction: column;
-  
-        .messages {
-          height: 300px;
-          overflow-y: scroll;
-          border: 1px solid #ccc;
-          padding: 10px;
-          margin-bottom: 10px;
+        input {
+          flex: 1;
+          padding: 8px;
         }
-  
-        .message-input {
-          display: flex;
-          input {
-            flex: 1;
-            padding: 8px;
-          }
-          button {
-            padding: 8px 12px;
-          }
+        button {
+          padding: 8px 12px;
         }
       }
     }
   }
-  .video-call {
-    display: flex;
-    gap: 10px;
-    margin-top: 20px;
-  
-    .video {
-      width: 240px;
-      height: 180px;
-      background: black;
-      border: 2px solid #ccc;
-      border-radius: 8px;
-    }
-  }
-  .video-call {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  
+}
+.video-call {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+
   .video {
-    width: 200px;
-    height: 150px;
+    width: 240px;
+    height: 180px;
     background: black;
-    border-radius: 10px;
+    border: 2px solid #ccc;
+    border-radius: 8px;
   }
-  
+}
+.video-call {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.video {
+  width: 200px;
+  height: 150px;
+  background: black;
+  border-radius: 10px;
+}
