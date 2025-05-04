@@ -27,6 +27,7 @@ function Chat() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
+  const callTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const servers = {
     iceServers: [
@@ -49,6 +50,7 @@ function Chat() {
     });
 
     socket.on('incoming_call', async ({ from, offer }) => {
+      clearTimeout(callTimeoutRef.current!);
       peerConnection.current = new RTCPeerConnection(servers);
       await setupMedia();
 
@@ -74,6 +76,7 @@ function Chat() {
     });
 
     socket.on('call_answered', async ({ answer }) => {
+      clearTimeout(callTimeoutRef.current!);
       await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(answer));
       setInCall(true);
     });
@@ -121,6 +124,7 @@ function Chat() {
   };
 
   const endCallCleanup = () => {
+    clearTimeout(callTimeoutRef.current!);
     peerConnection.current?.close();
     peerConnection.current = null;
 
@@ -185,8 +189,14 @@ function Chat() {
 
     const offer = await peerConnection.current.createOffer();
     await peerConnection.current.setLocalDescription(offer);
-
     socket.emit('call_user', { to: targetUser, offer });
+
+    // Timeout logic (20s)
+    callTimeoutRef.current = setTimeout(() => {
+      alert('Call timed out. No answer from recipient.');
+      socket.emit('end_call', { to: targetUser });
+      endCallCleanup();
+    }, 20000);
   };
 
   const endCall = () => {
