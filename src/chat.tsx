@@ -1,3 +1,4 @@
+// Chat.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import './chat.scss';
@@ -42,13 +43,11 @@ function Chat() {
 
   useEffect(() => {
     socket.on('receive_message', (msg: Message) => setMessages(prev => [...prev, msg]));
-
     socket.on('user_list', (list: string[]) => setUsers(list));
 
     socket.on('incoming_call', async ({ from, offer }) => {
       const pc = new RTCPeerConnection(servers);
       peerConnections.current[from] = pc;
-
       await setupMedia();
 
       pc.ontrack = (event) => {
@@ -65,7 +64,6 @@ function Chat() {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit('answer_call', { to: from, answer });
-
       setTargetUser(from);
       setInCall(true);
     });
@@ -86,7 +84,6 @@ function Chat() {
     socket.on('group_call_offer', async ({ from, group, offer }) => {
       const pc = new RTCPeerConnection(servers);
       peerConnections.current[from] = pc;
-
       await setupMedia();
 
       pc.ontrack = (event) => {
@@ -129,6 +126,7 @@ function Chat() {
       socket.off('group_call_offer');
       socket.off('group_call_answer');
       socket.off('group_ice_candidate');
+      socket.disconnect();
     };
   }, []);
 
@@ -136,25 +134,22 @@ function Chat() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStream.current = stream;
-
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
         localVideoRef.current.muted = true;
         await localVideoRef.current.play();
       }
     } catch (err) {
-      console.error('Media error:', err);
-      alert('Media access denied.');
+      alert('Media access denied');
+      console.error(err);
     }
   };
 
   const endCallCleanup = () => {
     Object.values(peerConnections.current).forEach(pc => pc.close());
     peerConnections.current = {};
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => track.stop());
-      localStream.current = null;
-    }
+    localStream.current?.getTracks().forEach(track => track.stop());
+    localStream.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setGroupStreams({});
@@ -162,14 +157,14 @@ function Chat() {
   };
 
   const handleRegister = () => {
-    if (username) {
+    if (username.trim()) {
       socket.emit('register', username);
       setRegistered(true);
     }
   };
 
   const joinGroup = () => {
-    if (group) {
+    if (group.trim()) {
       socket.emit('join_group', group);
       setJoinedGroup(group);
       setMode('group');
@@ -180,7 +175,7 @@ function Chat() {
     if (!message.trim()) return;
     if (mode === 'private') {
       socket.emit('private_message', { to: targetUser, message });
-    } else if (mode === 'group') {
+    } else {
       socket.emit('group_message', { group: joinedGroup, message });
     }
     setMessage('');
@@ -190,7 +185,6 @@ function Chat() {
     if (!targetUser) return;
     const pc = new RTCPeerConnection(servers);
     peerConnections.current[targetUser] = pc;
-
     await setupMedia();
 
     pc.ontrack = (event) => {
@@ -198,13 +192,10 @@ function Chat() {
     };
 
     pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        socket.emit('ice_candidate', { to: targetUser, candidate: e.candidate });
-      }
+      if (e.candidate) socket.emit('ice_candidate', { to: targetUser, candidate: e.candidate });
     };
 
     localStream.current?.getTracks().forEach(track => pc.addTrack(track, localStream.current!));
-
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     socket.emit('call_user', { to: targetUser, offer });
@@ -213,7 +204,6 @@ function Chat() {
   const startGroupCall = async () => {
     if (!joinedGroup) return;
     await setupMedia();
-
     const peers = users.filter(u => u !== username);
 
     for (const user of peers) {
@@ -227,12 +217,10 @@ function Chat() {
       };
 
       localStream.current?.getTracks().forEach(track => pc.addTrack(track, localStream.current!));
-
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       socket.emit('group_call_offer', { to: user, group: joinedGroup, offer });
     }
-
     setInCall(true);
   };
 
@@ -257,7 +245,7 @@ function Chat() {
             <h3>Users</h3>
             <select onChange={(e) => { setTargetUser(e.target.value); setMode('private'); }}>
               <option value="">-- Select User --</option>
-              {users.filter(u => u !== username).map((u) => (
+              {users.filter(u => u !== username).map(u => (
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
@@ -277,7 +265,7 @@ function Chat() {
             <div className="messages">
               {messages.map((msg, idx) => (
                 <div key={idx}>
-                  <strong>{msg.type === 'group' ? `[${msg.group}] ${msg.from}` : `${msg.from}`}:</strong> {msg.message}
+                  <strong>{msg.type === 'group' ? `[${msg.group}] ${msg.from}` : msg.from}:</strong> {msg.message}
                 </div>
               ))}
             </div>
