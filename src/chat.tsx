@@ -22,12 +22,12 @@ function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState<'private' | 'group'>('private');
   const [inCall, setInCall] = useState(false);
+  const [groupStreams, setGroupStreams] = useState<{ [user: string]: MediaStream }>({});
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null); // still used for private call
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
-  const callTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const servers = {
     iceServers: [
@@ -50,7 +50,6 @@ function Chat() {
     });
 
     socket.on('incoming_call', async ({ from, offer }) => {
-      clearTimeout(callTimeoutRef.current!);
       peerConnection.current = new RTCPeerConnection(servers);
       await setupMedia();
 
@@ -76,7 +75,6 @@ function Chat() {
     });
 
     socket.on('call_answered', async ({ answer }) => {
-      clearTimeout(callTimeoutRef.current!);
       await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(answer));
       setInCall(true);
     });
@@ -89,6 +87,33 @@ function Chat() {
       endCallCleanup();
     });
 
+    // Group call handlers
+    socket.on('group_call_offer', async ({ from, group, offer }) => {
+      peerConnection.current = new RTCPeerConnection(servers);
+      await setupMedia();
+
+      peerConnection.current.ontrack = (event) => {
+        setGroupStreams(prev => ({ ...prev, [from]: event.streams[0] }));
+      };
+
+      peerConnection.current.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit('ice_candidate', { to: from, candidate: e.candidate, group });
+        }
+      };
+
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+      socket.emit('group_call_answer', { to: from, answer, group });
+
+      setInCall(true);
+    });
+
+    socket.on('group_call_answer', async ({ from, answer }) => {
+      await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
     return () => {
       socket.off('receive_message');
       socket.off('user_list');
@@ -96,6 +121,8 @@ function Chat() {
       socket.off('call_answered');
       socket.off('ice_candidate');
       socket.off('call_ended');
+      socket.off('group_call_offer');
+      socket.off('group_call_answer');
     };
   }, []);
 
@@ -124,7 +151,6 @@ function Chat() {
   };
 
   const endCallCleanup = () => {
-    clearTimeout(callTimeoutRef.current!);
     peerConnection.current?.close();
     peerConnection.current = null;
 
@@ -133,14 +159,10 @@ function Chat() {
       localStream.current = null;
     }
 
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
-
+    setGroupStreams({});
     setInCall(false);
   };
 
@@ -189,18 +211,40 @@ function Chat() {
 
     const offer = await peerConnection.current.createOffer();
     await peerConnection.current.setLocalDescription(offer);
-    socket.emit('call_user', { to: targetUser, offer });
 
-    // Timeout logic (20s)
-    callTimeoutRef.current = setTimeout(() => {
-      alert('Call timed out. No answer from recipient.');
-      socket.emit('end_call', { to: targetUser });
-      endCallCleanup();
-    }, 20000);
+    socket.emit('call_user', { to: targetUser, offer });
+  };
+
+  const startGroupCall = async () => {
+    if (!joinedGroup) return;
+
+    peerConnection.current = new RTCPeerConnection(servers);
+    await setupMedia();
+
+    peerConnection.current.ontrack = (event) => {
+      const stream = event.streams[0];
+      setGroupStreams(prev => ({ ...prev, unknown: stream }));
+    };
+
+    peerConnection.current.onicecandidate = (e) => {
+      if (e.candidate) {
+        socket.emit('ice_candidate', { group: joinedGroup, candidate: e.candidate });
+      }
+    };
+
+    const offer = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offer);
+
+    socket.emit('start_group_call', {
+      group: joinedGroup,
+      offer,
+    });
+
+    setInCall(true);
   };
 
   const endCall = () => {
-    if (targetUser) {
+    if (mode === 'private' && targetUser) {
       socket.emit('end_call', { to: targetUser });
     }
     endCallCleanup();
@@ -231,6 +275,7 @@ function Chat() {
 
             <h3>Video Call</h3>
             <button onClick={startCall} disabled={!targetUser || inCall}>Start Call with {targetUser}</button>
+            <button onClick={startGroupCall} disabled={!joinedGroup || inCall}>Start Group Call</button>
             {inCall && <button onClick={endCall}>End Call</button>}
           </div>
 
@@ -254,9 +299,20 @@ function Chat() {
               <button onClick={sendMessage}>Send</button>
             </div>
 
-            <div className="video-call">
+            <div className="video-grid">
               <video ref={localVideoRef} autoPlay muted playsInline className="video" />
-              <video ref={remoteVideoRef} autoPlay playsInline className="video" />
+              {mode === 'private' && inCall && <video ref={remoteVideoRef} autoPlay playsInline className="video" />}
+              {mode === 'group' && Object.entries(groupStreams).map(([user, stream]) => (
+                <video
+                  key={user}
+                  autoPlay
+                  playsInline
+                  className="video"
+                  ref={(el) => {
+                    if (el) el.srcObject = stream;
+                  }}
+                />
+              ))}
             </div>
           </div>
         </div>
